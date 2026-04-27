@@ -1,0 +1,5 @@
+iol-api
+python-telegram-bot
+python-dotenv
+aiohttp
+schedule
