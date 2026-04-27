@@ -1,0 +1,175 @@
+{
+    "info": {
+        "name": "IOL API (CaucionBot)",
+        "description": "Colección de Postman para probar los endpoints de la API de Invertir Online usados por el bot.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "1. Login (Get Token)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "var jsonData = pm.response.json();",
+                            "if (jsonData.access_token) {",
+                            "    pm.collectionVariables.set(\"access_token\", jsonData.access_token);",
+                            "    console.log(\"Access token saved to collection variables\");",
+                            "}"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "urlencoded",
+                    "urlencoded": [
+                        {
+                            "key": "username",
+                            "value": "{{username}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "password",
+                            "value": "{{password}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "grant_type",
+                            "value": "password",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{base_url}}/token",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "token"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "2. Get Available Balance",
+            "request": {
+                "method": "GET",
+                "header": [
+                    {
+                        "key": "Authorization",
+                        "value": "Bearer {{access_token}}",
+                        "type": "text"
+                    }
+                ],
+                "url": {
+                    "raw": "{{base_url}}/api/v2/estadocuenta",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v2",
+                        "estadocuenta"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "3. Get Caucion Rates",
+            "request": {
+                "method": "GET",
+                "header": [
+                    {
+                        "key": "Authorization",
+                        "value": "Bearer {{access_token}}",
+                        "type": "text"
+                    }
+                ],
+                "url": {
+                    "raw": "{{base_url}}/api/v2/Cotizaciones/Cauciones/bcba",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v2",
+                        "Cotizaciones",
+                        "Cauciones",
+                        "bcba"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "4. Place Caucion Order",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Authorization",
+                        "value": "Bearer {{access_token}}",
+                        "type": "text"
+                    },
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\r\n    \"simbolo\": \"CA1D\",\r\n    \"cantidad\": 1000,\r\n    \"precio\": 50.0,\r\n    \"plazo\": \"t0\",\r\n    \"validez\": \"{{$isoTimestamp}}\",\r\n    \"mercado\": \"bCBA\"\r\n}",
+                    "options": {
+                        "raw": {
+                            "language": "json"
+                        }
+                    }
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/v2/Operar/Vender",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v2",
+                        "Operar",
+                        "Vender"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "https://api.invertironline.com",
+            "type": "string"
+        },
+        {
+            "key": "username",
+            "value": "TU_USUARIO_AQUI",
+            "type": "string"
+        },
+        {
+            "key": "password",
+            "value": "TU_CONTRASEÑA_AQUI",
+            "type": "string"
+        },
+        {
+            "key": "access_token",
+            "value": "",
+            "type": "string"
+        }
+    ]
+}

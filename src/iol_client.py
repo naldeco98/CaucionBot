@@ -1,44 +1,99 @@
 import os
 import asyncio
-from iol_api import IOLAPI
+import aiohttp
+import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class IOLClient:
+    BASE_URL = "https://api.invertironline.com"
+
     def __init__(self, username=None, password=None):
         self.username = username or os.getenv("IOL_USERNAME")
         self.password = password or os.getenv("IOL_PASSWORD")
-        self.api = None
+        self.access_token = None
+        self.token_expiry = None
+        self._session = None
+
+    async def _get_session(self):
+        """Devuelve la sesión actual o crea una nueva si no existe."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """Cierra la sesión de aiohttp."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def _ensure_auth(self):
-        if self.api is None:
-            self.api = IOLAPI(username=self.username, password=self.password)
-            # La librería iol-api suele manejar el login automáticamente en el primer llamado,
-            # pero algunas versiones requieren un llamado explícito o se inicializan con credenciales.
+        """Asegura que tengamos un token válido."""
+        now = datetime.datetime.now()
+        if self.access_token is None or (self.token_expiry and now >= self.token_expiry):
+            await self._login()
+
+    async def _login(self):
+        """Realiza el login para obtener el access_token."""
+        session = await self._get_session()
+        url = f"{self.BASE_URL}/token"
+        data = {
+            "username": self.username,
+            "password": self.password,
+            "grant_type": "password"
+        }
+        try:
+            async with session.post(url, data=data) as response:
+                if response.status == 200:
+                    res_json = await response.json()
+                    self.access_token = res_json.get("access_token")
+                    expires_in = res_json.get("expires_in", 3600)
+                    # Restamos 60 segundos de margen
+                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in - 60)
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Error de autenticación: {response.status} - {error_text}")
+        except Exception as e:
+            print(f"Excepción durante el login: {e}")
+            raise
 
     async def get_available_balance(self):
         """Obtiene el saldo disponible en pesos para operar."""
-        await self._ensure_auth()
         try:
-            estado = await self.api.get_estado_cuenta()
-            # El formato suele ser una lista de cuentas o un objeto con saldos
-            # Necesitamos extraer el saldo disponible en pesos (ARS)
-            for cuenta in estado.get('cuentas', []):
-                if cuenta.get('moneda') == 'Peso Argentino':
-                    return cuenta.get('disponible', 0.0)
-            return 0.0
+            await self._ensure_auth()
+            session = await self._get_session()
+            url = f"{self.BASE_URL}/api/v2/estadocuenta"
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    estado = await response.json()
+                    for cuenta in estado.get('cuentas', []):
+                        if cuenta.get('moneda') == 'Peso Argentino':
+                            return cuenta.get('disponible', 0.0)
+                    return 0.0
+                else:
+                    print(f"Error al obtener saldo: {response.status}")
+                    return 0.0
         except Exception as e:
             print(f"Error al obtener saldo: {e}")
             return 0.0
 
     async def get_caucion_rates(self):
         """Obtiene las tasas de cauciones actuales para pesos."""
-        await self._ensure_auth()
         try:
-            # Según la documentación de IOL API v2
-            cauciones = await self.api.get_cauciones(mercado="bcba", simbolo="PESOS")
-            return cauciones
+            await self._ensure_auth()
+            session = await self._get_session()
+            # En la API v2, se usa 'bcba' como mercado para Argentina
+            url = f"{self.BASE_URL}/api/v2/Cotizaciones/Cauciones/argentina/Todos"
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    print(f"Error al obtener tasas de cauciones: {response.status}")
+                    return []
         except Exception as e:
             print(f"Error al obtener tasas de cauciones: {e}")
             return []
@@ -46,41 +101,38 @@ class IOLClient:
     async def place_caucion_order(self, amount, rate, term_days=1, dry_run=True):
         """
         Coloca una orden de caución (Venta en el contexto de IOL para colocar capital).
-        amount: monto en pesos
-        rate: TNA (Tasa Nominal Anual)
-        term_days: días de plazo (ej. 1 para caución a 1 día)
-        dry_run: si es True, no ejecuta la orden real.
         """
-        await self._ensure_auth()
-        
-        symbol = f"CA{term_days}D" # Ejemplo: CA1D para 1 día. Esto puede variar según el broker.
-        # En IOL, para colocar dinero se suele usar Venta.
-        
         if dry_run:
             print(f"[DRY RUN] Colocando caución: {amount} ARS a {rate}% TNA por {term_days} días.")
             return {"status": "success", "order_id": "DRY_RUN_ID", "dry_run": True}
 
         try:
-            # Este endpoint puede variar o requerir parámetros específicos como cantidad, precio (tasa), etc.
-            # Según el Help de IOL: POST /api/v2/Operar/Vender
-            # Sin embargo, cauciones a veces tiene su propio endpoint.
-            # Verificamos si iol-api tiene un método específico. 
-            # Si no, usamos el genérico de vender si es compatible.
+            await self._ensure_auth()
+            session = await self._get_session()
+            url = f"{self.BASE_URL}/api/v2/Operar/Vender"
+            headers = {"Authorization": f"Bearer {self.access_token}"}
             
-            # Nota: Colocar caución en IOL a veces se hace vía /api/v2/Operar/Caucion
-            # Si iol-api no lo soporta directamente, habría que extenderlo.
+            # Símbolo: CA + días + D (ej: CA1D)
+            symbol = f"CA{term_days}D"
             
-            # Asumimos por ahora que existe un método o usamos el genérico.
-            # result = await self.api.vender(simbolo=symbol, cantidad=amount, precio=rate, plazo="t0")
-            
-            # ATENCIÓN: Operar cauciones es crítico. En IOL se usa el endpoint de cauciones.
-            # Por seguridad, implementaremos una advertencia si el método no está claro.
-            print(f"EJECUTANDO ORDEN REAL: {amount} ARS a {rate}% TNA")
-            
-            # TODO: Validar el método exacto en la librería iol-api para cauciones.
-            # result = await self.api.operar_caucion(monto=amount, tasa=rate, dias=term_days)
-            
-            return {"status": "error", "message": "Método de operación no confirmado plenamente en iol-api. Revisar implementación."}
+            # Validez hasta el cierre de hoy (16:30 ART)
+            validez = datetime.datetime.now().replace(hour=16, minute=30, second=0, microsecond=0).isoformat()
+
+            payload = {
+                "simbolo": symbol,
+                "cantidad": int(amount),
+                "precio": float(rate),
+                "plazo": "t0",
+                "validez": validez,
+                "mercado": "bCBA"
+            }
+
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return {"status": "success", "data": data}
+                else:
+                    error_text = await response.text()
+                    return {"status": "error", "message": f"{response.status} - {error_text}"}
         except Exception as e:
-            print(f"Error al colocar orden: {e}")
             return {"status": "error", "message": str(e)}
