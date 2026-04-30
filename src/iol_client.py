@@ -69,7 +69,7 @@ class IOLClient:
                 if response.status == 200:
                     estado = await response.json()
                     for cuenta in estado.get('cuentas', []):
-                        if cuenta.get('moneda') == 'Peso Argentino':
+                        if cuenta.get('moneda') == 'peso_Argentino':
                             return cuenta.get('disponible', 0.0)
                     return 0.0
                 else:
