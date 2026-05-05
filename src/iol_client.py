@@ -2,7 +2,10 @@ import os
 import asyncio
 import aiohttp
 import datetime
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -54,7 +57,7 @@ class IOLClient:
                     error_text = await response.text()
                     raise Exception(f"Error de autenticación: {response.status} - {error_text}")
         except Exception as e:
-            print(f"Excepción durante el login: {e}")
+            logger.error(f"Excepción durante el login: {e}")
             raise
 
     async def get_available_balance(self):
@@ -73,10 +76,10 @@ class IOLClient:
                             return cuenta.get('disponible', 0.0)
                     return 0.0
                 else:
-                    print(f"Error al obtener saldo: {response.status}")
+                    logger.error(f"Error al obtener saldo: {response.status}")
                     return 0.0
         except Exception as e:
-            print(f"Error al obtener saldo: {e}")
+            logger.error(f"Error al obtener saldo: {e}")
             return 0.0
 
     async def get_caucion_rates(self):
@@ -92,10 +95,10 @@ class IOLClient:
                 if response.status == 200:
                     return await response.json()
                 else:
-                    print(f"Error al obtener tasas de cauciones: {response.status}")
+                    logger.error(f"Error al obtener tasas de cauciones: {response.status}")
                     return []
         except Exception as e:
-            print(f"Error al obtener tasas de cauciones: {e}")
+            logger.error(f"Error al obtener tasas de cauciones: {e}")
             return []
 
     async def place_caucion_order(self, amount, rate, term_days=1, dry_run=True):
@@ -103,7 +106,7 @@ class IOLClient:
         Coloca una orden de caución (Venta en el contexto de IOL para colocar capital).
         """
         if dry_run:
-            print(f"[DRY RUN] Colocando caución: {amount} ARS a {rate}% TNA por {term_days} días.")
+            logger.info(f"[DRY RUN] Colocando caución: {amount} ARS a {rate}% TNA por {term_days} días.")
             return {"status": "success", "order_id": "DRY_RUN_ID", "dry_run": True}
 
         try:

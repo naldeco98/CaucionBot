@@ -3,10 +3,18 @@ import asyncio
 import schedule
 import time
 from datetime import datetime
+import logging
 from src.bot_logic import CaucionBot
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 async def run_bot_task():
     bot = CaucionBot()
@@ -17,14 +25,14 @@ def job():
     asyncio.run(run_bot_task())
 
 def main():
-    print("🚀 CaucionBot iniciado y esperando el horario programado...")
+    logger.info("🚀 CaucionBot iniciado y esperando el horario programado...")
     
     # Programar para las 12:00 cada día (horario donde suele haber buena liquidez)
     schedule.every().day.at("12:00", "America/Argentina/Buenos_Aires").do(job)
     
     # También podemos hacer una ejecución de prueba al inicio si estamos en DRY_RUN
     if os.getenv("DRY_RUN", "True").lower() == "true":
-        print("Ejecutando prueba inicial (DRY_RUN)...")
+        logger.info("Ejecutando prueba inicial (DRY_RUN)...")
         job()
 
     while True:
@@ -35,4 +43,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n👋 Bot detenido por el usuario.")
+        logger.info("👋 Bot detenido por el usuario.")

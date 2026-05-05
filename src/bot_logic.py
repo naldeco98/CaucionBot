@@ -2,8 +2,11 @@ import os
 import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import logging
 from src.iol_client import IOLClient
 from src.telegram_bot import TelegramNotifier
+
+logger = logging.getLogger(__name__)
 
 class CaucionBot:
     def __init__(self):
@@ -20,12 +23,12 @@ class CaucionBot:
         # Ejecuta una iteración de la lógica del bot.
         try:
             now = datetime.now(self.tz)
-            print(f"[{now}] Iniciando chequeo de cauciones (Hora ART)...")
+            logger.info(f"[{now}] Iniciando chequeo de cauciones (Hora ART)...")
             
             # Cut-off Time check (16:00)
             if now.hour >= 16:
                 msg = "⏳ Horario límite alcanzado (16:00). Abortando para evitar fondos ociosos sin colocar."
-                print(msg)
+                logger.warning(msg)
                 return
 
             # 1. Obtener saldo (C)
@@ -33,11 +36,11 @@ class CaucionBot:
             # Check Liquidity Needs (Reserve cash if required)
             balance = total_balance - self.reserve_cash            
             
-            print(f"Saldo total: ${total_balance:,.2f} ARS | Reservado: ${self.reserve_cash:,.2f} ARS")
-            print(f"Saldo a invertir: ${balance:,.2f} ARS")
+            logger.info(f"Saldo total: ${total_balance:,.2f} ARS | Reservado: ${self.reserve_cash:,.2f} ARS")
+            logger.info(f"Saldo a invertir: ${balance:,.2f} ARS")
             
             if balance < self.min_balance:
-                print(f"⚠️ Saldo a invertir insuficiente (${balance:,.2f} ARS). Mínimo: ${self.min_balance}")
+                logger.warning(f"⚠️ Saldo a invertir insuficiente (${balance:,.2f} ARS). Mínimo: ${self.min_balance}")
                 return
 
             # 2. Obtener mejores tasas (TNA_m)
@@ -68,7 +71,7 @@ class CaucionBot:
 
             if not best_option:
                 msg = "ℹ️ No hay opciones viables para operar."
-                print(msg)
+                logger.info(msg)
                 await self.notifier.send_message(msg)
                 return
 
@@ -84,7 +87,7 @@ class CaucionBot:
                 if asks:
                     target_rate = min(asks) - 0.1
             
-            print(f"Ejecutando: {best_option['symbol']} | TNA Objetivo: {target_rate}%")
+            logger.info(f"Ejecutando: {best_option['symbol']} | TNA Objetivo: {target_rate}%")
             
             result = await self.iol.place_caucion_order(
                 amount=balance, 
@@ -101,7 +104,7 @@ class CaucionBot:
                        f"📈 Tasa: {target_rate}%\n"
                        f"🗓️ Plazo: {best_option['term_days']} día(s)")
                 await self.notifier.send_message(msg)
-                print(f"Log: TNA {target_rate}% colocada con éxito.")
+                logger.info(f"Log: TNA {target_rate}% colocada con éxito.")
             else:
                 msg = f"❌ Error al colocar caución: {result.get('message')}"
                 await self.notifier.send_message(msg)

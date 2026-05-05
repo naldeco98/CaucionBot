@@ -2,6 +2,9 @@ import os
 import asyncio
 from telegram import Bot
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -14,14 +17,14 @@ class TelegramNotifier:
     async def send_message(self, text):
         """Envía un mensaje de texto vía Telegram."""
         if not self.bot or not self.chat_id:
-            print(f"Telegram no configurado. Mensaje: {text}")
+            logger.warning(f"Telegram no configurado. Mensaje: {text}")
             return False
         
         try:
             await self.bot.send_message(chat_id=self.chat_id, text=text)
             return True
         except Exception as e:
-            print(f"Error al enviar mensaje de Telegram: {e}")
+            logger.error(f"Error al enviar mensaje de Telegram: {e}")
             return False
 
 async def test_notification():
