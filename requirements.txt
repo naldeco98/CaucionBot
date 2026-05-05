@@ -2,3 +2,4 @@ python-telegram-bot
 python-dotenv
 aiohttp
 schedule
+pytz
