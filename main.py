@@ -20,7 +20,7 @@ def main():
     print("🚀 CaucionBot iniciado y esperando el horario programado...")
     
     # Programar para las 12:00 cada día (horario donde suele haber buena liquidez)
-    schedule.every().day.at("12:00").do(job)
+    schedule.every().day.at("12:00", "America/Argentina/Buenos_Aires").do(job)
     
     # También podemos hacer una ejecución de prueba al inicio si estamos en DRY_RUN
     if os.getenv("DRY_RUN", "True").lower() == "true":
