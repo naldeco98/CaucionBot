@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: caucionbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
