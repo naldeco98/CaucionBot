@@ -2,6 +2,7 @@ import os
 import asyncio
 import schedule
 import time
+import argparse
 from datetime import datetime
 import logging
 from src.bot_logic import CaucionBot
@@ -25,13 +26,20 @@ def job():
     asyncio.run(run_bot_task())
 
 def main():
+    parser = argparse.ArgumentParser(description="CaucionBot - Automatización de cauciones bursátiles.")
+    parser.add_argument("--force-run", action="store_true", help="Ejecutar el bot inmediatamente al iniciar.")
+    args = parser.parse_args()
+
     logger.info("🚀 CaucionBot iniciado y esperando el horario programado...")
     
     # Programar para las 12:00 cada día (horario donde suele haber buena liquidez)
     schedule.every().day.at("12:00", "America/Argentina/Buenos_Aires").do(job)
     
-    # También podemos hacer una ejecución de prueba al inicio si estamos en DRY_RUN
-    if os.getenv("DRY_RUN", "True").lower() == "true":
+    # Ejecución inmediata si se solicita por argumento o si estamos en DRY_RUN
+    if args.force_run:
+        logger.info("Ejecución forzada por argumento --force-run...")
+        job()
+    elif os.getenv("DRY_RUN", "True").lower() == "true":
         logger.info("Ejecutando prueba inicial (DRY_RUN)...")
         job()
 
