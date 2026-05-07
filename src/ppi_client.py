@@ -11,7 +11,11 @@ load_dotenv()
 
 class PPIClient:
     # Base URL for Production. For Sandbox use: https://sandbox.api.portfoliopersonal.com
-    BASE_URL = os.getenv("PPI_BASE_URL", "https://api.portfoliopersonal.com")
+    DRY_RUN = os.getenv("DRY_RUN", "true")
+    if DRY_RUN == "true":
+        BASE_URL = os.getenv("PPI_BASE_URL", "https://sandbox.api.portfoliopersonal.com")
+    else:
+        BASE_URL = os.getenv("PPI_BASE_URL", "https://api.portfoliopersonal.com")
 
     def __init__(self, api_key=None, api_secret=None):
         self.api_key = api_key or os.getenv("PPI_API_KEY")
