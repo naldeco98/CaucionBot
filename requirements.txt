@@ -3,3 +3,4 @@ python-dotenv
 aiohttp
 schedule
 pytz
+ppi-client

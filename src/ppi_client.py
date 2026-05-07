@@ -1,183 +1,161 @@
 import os
 import asyncio
-import aiohttp
-import datetime
 import logging
+import decimal
+from datetime import datetime
 from dotenv import load_dotenv
+from ppi_client.ppi import PPI
+from ppi_client.models.order_confirm import OrderConfirm
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 class PPIClient:
-    # Base URL for Production. For Sandbox use: https://sandbox.api.portfoliopersonal.com
-    DRY_RUN = os.getenv("DRY_RUN", "true")
-    if DRY_RUN == "true":
-        BASE_URL = os.getenv("PPI_BASE_URL", "https://sandbox.api.portfoliopersonal.com")
-    else:
-        BASE_URL = os.getenv("PPI_BASE_URL", "https://api.portfoliopersonal.com")
-
+    """
+    Wrapper sobre la librería oficial ppi-client para Portfolio Personal Inversiones.
+    Mantiene la interfaz asincrónica para compatibilidad con el resto del bot.
+    """
+    
     def __init__(self, api_key=None, api_secret=None):
         self.api_key = api_key or os.getenv("PPI_API_KEY")
         self.api_secret = api_secret or os.getenv("PPI_API_SECRET")
-        self.access_token = None
-        self.token_expiry = None
-        self._session = None
-
-    async def _get_session(self):
-        """Devuelve la sesión actual o crea una nueva si no existe."""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-
-    async def close(self):
-        """Cierra la sesión de aiohttp."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        self.account_number = os.getenv("PPI_ACCOUNT_NUMBER")
+        
+        # Determinamos si usar sandbox basado en DRY_RUN o PPI_BASE_URL
+        # El cliente oficial usa un booleano para sandbox.
+        dry_run_env = os.getenv("DRY_RUN", "true").lower() == "true"
+        base_url = os.getenv("PPI_BASE_URL", "")
+        is_sandbox = dry_run_env or "sandbox" in base_url.lower()
+        
+        self.ppi = PPI(sandbox=is_sandbox)
+        self._is_logged_in = False
 
     async def _ensure_auth(self):
-        """Asegura que tengamos un token válido."""
-        now = datetime.datetime.now()
-        if self.access_token is None or (self.token_expiry and now >= self.token_expiry):
-            await self._login()
+        """Asegura que la sesión esté autenticada."""
+        if not self._is_logged_in:
+            try:
+                # Login es una operación bloqueante en la librería oficial
+                await asyncio.to_thread(self.ppi.account.login_api, self.api_key, self.api_secret)
+                self._is_logged_in = True
+                logger.info("Autenticación exitosa con el cliente oficial de PPI.")
+                
+                # Si no hay número de cuenta configurado, intentamos detectar el primero disponible
+                if not self.account_number:
+                    accounts = await asyncio.to_thread(self.ppi.account.get_accounts)
+                    if accounts and len(accounts) > 0:
+                        self.account_number = accounts[0].get('accountNumber')
+                        logger.info(f"Cuenta detectada automáticamente: {self.account_number}")
+                    else:
+                        logger.error("No se encontraron cuentas comitentes disponibles.")
+            except Exception as e:
+                logger.error(f"Error al autenticar en PPI: {e}")
+                raise
 
-    async def _login(self):
-        """Realiza el login para obtener el access_token."""
-        session = await self._get_session()
-        url = f"{self.BASE_URL}/api/v1/Account/Login"
-        headers = {
-            "ApiKey": self.api_key,
-            "ApiSecret": self.api_secret,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        try:
-            async with session.post(url, headers=headers, json={}) as response:
-                if response.status == 200:
-                    res_json = await response.json()
-                    self.access_token = res_json.get("accessToken")
-                    # El token de PPI suele durar 30-60 min. 
-                    # Si no viene expiry, asumimos 30 min por seguridad.
-                    expires_in = 1800 
-                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in - 60)
-                    logger.info("Login en PPI exitoso.")
-                else:
-                    error_text = await response.text()
-                    raise Exception(f"Error de autenticación en PPI: {response.status} - {error_text}")
-        except Exception as e:
-            logger.error(f"Excepción durante el login en PPI: {e}")
-            raise
+    async def close(self):
+        """
+        No se requiere cierre explícito de sesión en la librería oficial (usa requests),
+        pero se mantiene el método para compatibilidad de interfaz.
+        """
+        pass
 
     async def get_available_balance(self):
-        """Obtiene el saldo disponible en pesos para operar."""
+        """Obtiene el saldo disponible en pesos (ARS) con liquidación inmediata."""
         try:
             await self._ensure_auth()
-            session = await self._get_session()
-            url = f"{self.BASE_URL}/api/v1/Account/Balance"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
+            balances = await asyncio.to_thread(self.ppi.account.get_available_balance, self.account_number)
             
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    balances = await response.json()
-                    # PPI devuelve una lista de balances por moneda y liquidación
-                    for balance in balances:
-                        # Buscamos pesos en liquidación inmediata (Inmediato)
-                        if balance.get('currency') == 'ARS' and balance.get('settlement') == 'Inmediato':
-                            return balance.get('available', 0.0)
-                    # Si no encontramos Inmediato, buscamos cualquier ARS disponible
-                    for balance in balances:
-                        if balance.get('currency') == 'ARS':
-                            return balance.get('available', 0.0)
-                    return 0.0
-                else:
-                    logger.error(f"Error al obtener saldo PPI: {response.status}")
-                    return 0.0
+            # Buscamos ARS en Inmediato
+            for balance in balances:
+                if balance.get('symbol') == 'ARS' and balance.get('settlement') == 'Inmediato':
+                    return float(balance.get('amount', 0.0))
+            
+            # Fallback a cualquier ARS si no hay 'Inmediato'
+            for balance in balances:
+                if balance.get('symbol') == 'ARS':
+                    return float(balance.get('amount', 0.0))
+            
+            return 0.0
         except Exception as e:
             logger.error(f"Error al obtener saldo PPI: {e}")
             return 0.0
 
     async def get_caucion_rates(self):
         """
-        Obtiene las tasas de cauciones actuales para pesos.
-        PPI requiere consultar por ticker específico o buscar.
+        Obtiene las tasas de cauciones actuales.
+        Simula la estructura esperada por la lógica del bot.
         """
         try:
             await self._ensure_auth()
-            session = await self._get_session()
+            results = {"titulos": []}
             
-            # En PPI las cauciones suelen tener el formato "PESOS - X DIAS" o tickers tipo "CA1", "CA7"
-            # Vamos a intentar buscar todas las cauciones disponibles en pesos.
-            url = f"{self.BASE_URL}/api/v1/MarketData/Search?ticker=PESOS&type=Caucion"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    cauciones = await response.json()
-                    # Para cada caución encontrada, obtenemos su cotización actual
-                    results = {"titulos": []}
-                    for c in cauciones:
-                        ticker = c.get('ticker')
-                        # Solo nos interesan cauciones en BYMA
-                        if c.get('market') != 'BYMA': continue
+            # Consultamos los plazos más operados
+            for plazo in ["1", "7"]:
+                try:
+                    # En el cliente oficial, el ticker es "PESOS" y el plazo es el settlement
+                    data = await asyncio.to_thread(
+                        self.ppi.marketdata.current, 
+                        "PESOS", "CAUCIONES", plazo
+                    )
+                    
+                    if data and data.get('lastPrice'):
+                        titulo = {
+                            "simbolo": f"PESOS - {plazo} DIA{'S' if int(plazo) > 1 else ''}",
+                            "ultimoPrecio": float(data.get('lastPrice')),
+                            "puntas": []
+                        }
                         
-                        quote_url = f"{self.BASE_URL}/api/v1/MarketData/Current?ticker={ticker}&type=Caucion&settlement=Inmediato"
-                        async with session.get(quote_url, headers=headers) as q_resp:
-                            if q_resp.status == 200:
-                                q_data = await q_resp.json()
-                                # Adaptamos al formato que espera bot_logic.py
-                                results["titulos"].append({
-                                    "simbolo": ticker,
-                                    "ultimoPrecio": q_data.get('last'),
-                                    "puntas": [
-                                        {
-                                            "precioCompra": q_data.get('bid'),
-                                            "precioVenta": q_data.get('ask')
-                                        }
-                                    ]
-                                })
-                    return results
-                else:
-                    logger.error(f"Error al buscar cauciones PPI: {response.status}")
-                    return {"titulos": []}
+                        # Mapeamos la mejor punta de compra y venta
+                        bids = data.get('bids', [])
+                        offers = data.get('offers', [])
+                        if bids or offers:
+                            punta = {}
+                            if bids: punta["precioCompra"] = float(bids[0].get('price'))
+                            if offers: punta["precioVenta"] = float(offers[0].get('price'))
+                            titulo["puntas"].append(punta)
+                        
+                        results["titulos"].append(titulo)
+                except Exception:
+                    # Es normal que algunos plazos no tengan mercado en ese momento
+                    continue
+            
+            return results
         except Exception as e:
-            logger.error(f"Error al obtener tasas de cauciones PPI: {e}")
+            logger.error(f"Error al obtener tasas de cauciones: {e}")
             return {"titulos": []}
 
     async def place_caucion_order(self, amount, rate, term_days=1, ticker=None, dry_run=True):
         """
-        Coloca una orden de caución (SELL para colocadora).
+        Coloca una orden de caución (Venta para colocadora).
         """
-        # PPI usa tickers descriptivos. Si no se pasa uno, intentamos deducirlo.
-        if not ticker:
-            ticker = f"PESOS - {term_days} DIA{'S' if term_days > 1 else ''}"
-
         if dry_run:
-            logger.info(f"[DRY RUN PPI] Colocando caución: {amount} ARS a {rate}% TNA ({ticker})")
+            logger.info(f"[DRY RUN] Colocando caución: {amount} ARS a {rate}% TNA (Plazo: {term_days} días)")
             return {"status": "success", "order_id": "DRY_RUN_ID", "dry_run": True}
 
         try:
             await self._ensure_auth()
-            session = await self._get_session()
-            url = f"{self.BASE_URL}/api/v1/Order/Add"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
             
-            payload = {
-                "ticker": ticker,
-                "quantity": int(amount),
-                "price": float(rate),
-                "side": "SELL",
-                "type": "Limit",
-                "validity": "Day",
-                "settlement": "Inmediato",
-                "assetType": "Caucion"
-            }
-
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return {"status": "success", "data": data}
-                else:
-                    error_text = await response.text()
-                    return {"status": "error", "message": f"{response.status} - {error_text}"}
+            # Construimos el modelo de confirmación de orden
+            order_confirm = OrderConfirm(
+                accountNumber=self.account_number,
+                ticker="PESOS",
+                quantity=int(amount),
+                price=decimal.Decimal(str(rate)),
+                instrumentType="CAUCIONES",
+                quantityType="MONTO",
+                operationType="LIMIT",
+                operationTerm="DAY",
+                operationMaxDate=datetime.now(),
+                operation="SELL", # SELL para colocar (prestar dinero)
+                settlement=str(term_days),
+                disclaimers=[],
+                externalId=None
+            )
+            
+            # Ejecutamos la orden
+            response = await asyncio.to_thread(self.ppi.orders.confirm, order_confirm)
+            return {"status": "success", "data": response}
+            
         except Exception as e:
+            logger.error(f"Error al colocar orden de caución: {e}")
             return {"status": "error", "message": str(e)}
