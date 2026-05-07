@@ -3,14 +3,14 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
-from src.iol_client import IOLClient
+from src.ppi_client import PPIClient
 from src.telegram_bot import TelegramNotifier
 
 logger = logging.getLogger(__name__)
 
 class CaucionBot:
     def __init__(self):
-        self.iol = IOLClient()
+        self.broker = PPIClient()
         self.notifier = TelegramNotifier()
         self.tz = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -23,7 +23,7 @@ class CaucionBot:
         # Ejecuta una iteración de la lógica del bot.
         try:
             now = datetime.now(self.tz)
-            logger.info(f"[{now}] Iniciando chequeo de cauciones (Hora ART)...")
+            logger.info(f"[{now}] Iniciando chequeo de cauciones PPI (Hora ART)...")
             
             # Cut-off Time check (16:00)
             if now.hour >= 16:
@@ -32,7 +32,7 @@ class CaucionBot:
                 return
 
             # 1. Obtener saldo (C)
-            total_balance = await self.iol.get_available_balance()
+            total_balance = await self.broker.get_available_balance()
             # Check Liquidity Needs (Reserve cash if required)
             balance = total_balance - self.reserve_cash            
             
@@ -44,22 +44,24 @@ class CaucionBot:
                 return
 
             # 2. Obtener mejores tasas (TNA_m)
-            rates = await self.iol.get_caucion_rates()
+            rates = await self.broker.get_caucion_rates()
 
             if not rates or not rates.get("titulos"):
-                await self.notifier.send_message("❌ No se pudieron obtener las tasas de cauciones.")
+                await self.notifier.send_message("❌ No se pudieron obtener las tasas de cauciones de PPI.")
                 return
 
             best_option = None
             for r in rates.get("titulos", []):
                 symbol = r.get('simbolo', '')
                 try:
+                    # En PPI los tickers pueden ser "PESOS - 1 DIA" o "CA1"
+                    # Intentamos extraer el número de días
                     days = int(''.join(filter(str.isdigit, symbol))) if any(c.isdigit() for c in symbol) else 1
                 except:
                     days = 1
                 
                 market_tna = r.get('ultimoPrecio', 0)
-                if market_tna == 0: continue
+                if not market_tna or market_tna == 0: continue
 
                 if not best_option or market_tna > best_option['market_tna']:
                     best_option = {
@@ -70,7 +72,7 @@ class CaucionBot:
                     }
 
             if not best_option:
-                msg = "ℹ️ No hay opciones viables para operar."
+                msg = "ℹ️ No hay opciones viables para operar en PPI."
                 logger.info(msg)
                 await self.notifier.send_message(msg)
                 return
@@ -87,29 +89,30 @@ class CaucionBot:
                 if asks:
                     target_rate = min(asks) - 0.1
             
-            logger.info(f"Ejecutando: {best_option['symbol']} | TNA Objetivo: {target_rate}%")
+            logger.info(f"Ejecutando PPI: {best_option['symbol']} | TNA Objetivo: {target_rate}%")
             
-            result = await self.iol.place_caucion_order(
+            result = await self.broker.place_caucion_order(
                 amount=balance, 
                 rate=target_rate, 
                 term_days=best_option['term_days'], 
+                ticker=best_option['symbol'],
                 dry_run=self.dry_run
             )
             
             # 4. Notificar
             if result.get("status") == "success":
                 mode = "[MODO PRUEBA]" if self.dry_run else "[REAL]"
-                msg = (f"✅ {mode} Caución colocada.\n"
+                msg = (f"✅ {mode} Caución PPI colocada.\n"
                        f"💰 Invertido: ${balance:,.2f} ARS\n"
                        f"📈 Tasa: {target_rate}%\n"
-                       f"🗓️ Plazo: {best_option['term_days']} día(s)")
+                       f"🗓️ Plazo: {best_option['term_days']} día(s) ({best_option['symbol']})")
                 await self.notifier.send_message(msg)
-                logger.info(f"Log: TNA {target_rate}% colocada con éxito.")
+                logger.info(f"Log PPI: TNA {target_rate}% colocada con éxito.")
             else:
-                msg = f"❌ Error al colocar caución: {result.get('message')}"
+                msg = f"❌ Error al colocar caución PPI: {result.get('message')}"
                 await self.notifier.send_message(msg)
         finally:
-            await self.iol.close()
+            await self.broker.close()
 
 async def main():
     bot = CaucionBot()

@@ -1,6 +1,6 @@
 # CaucionBot 🤖🇦🇷
 
-Bot de automatización para cauciones bursátiles en el mercado argentino a través de **InvertirOnline (IOL)**.
+Bot de automatización para cauciones bursátiles en el mercado argentino a través de **Portfolio Personal Inversiones (PPI)**.
 
 ## Características
 - 💸 **Inversión Automática**: Coloca cauciones diariamente con el saldo disponible.
@@ -24,7 +24,7 @@ Bot de automatización para cauciones bursátiles en el mercado argentino a trav
    ```
 4. **Configurar credenciales**:
    - Copia el archivo `.env.example` a `.env`.
-   - Completa tus datos de IOL y el token de tu Bot de Telegram.
+   - Completa tus credenciales de API de PPI (Public Key y Private Key) y el token de tu Bot de Telegram.
    - Para obtener tu `TELEGRAM_CHAT_ID`, puedes usar bots como `@userinfobot`.
 
 ## Uso
